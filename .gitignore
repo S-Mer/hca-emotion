@@ -1,9 +1,23 @@
+# Python
 "venv/" 
 "__pycache__/" 
 "*.pyc" 
-".env" 
+".env"
+
+# R
 "*.RData" 
-"*.Rhistory" 
+"*.Rhistory"
+".Rproj.user/"
+
+# Folder exclusions
 "Data/" 
 "Logs/" 
 "Output/" 
+
+# Data file catches
+"*.csv" 
+"*.json"
+"*.xlsx"
+
+# IDE
+".vscode/launch.json"
