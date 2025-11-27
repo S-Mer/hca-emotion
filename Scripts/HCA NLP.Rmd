@@ -1,0 +1,52 @@
+---
+title: "HCA Emotion Detection NLP"
+output: html_document
+date: "2025-11-16"
+---
+
+# Load relevant libraries
+```{r}
+library(tidyverse)
+library(tidytext)
+library(hcandersenr)
+```
+
+```{r}
+# Import tales; originally separated tales into 80-character chunks. instead collapse to one obs per tale
+tales <- hcandersen_en %>%
+  group_by(book) %>%
+  summarise(text = paste(text, collapse = " ")) %>%
+  ungroup()
+
+# Tidytext operations, create sentence-level and word-level data
+tales_sentences <- tales %>%
+  unnest_tokens(sentence_text, text, token = "sentences") %>%
+  group_by(book) %>%
+  mutate(
+    sentence_position = row_number(),
+    total_sentences = n(),
+    sentence_proportion = sentence_position / total_sentences
+  ) %>%
+  ungroup()
+
+tales_words <- tales_sentences %>%
+  unnest_tokens(word, sentence_text) %>%
+  group_by(book, sentence_position) %>% 
+  mutate(word_position_in_sentence = row_number()) %>%
+  group_by(book) %>%
+  mutate(
+    word_position_in_tale = row_number(),
+    total_words_in_tale = n(),
+    word_proportion = word_position_in_tale / total_words_in_tale
+  ) %>%
+  ungroup()
+```
+
+Export HCA texts to CSV for use in pre-trained models in Python 
+
+```{r}
+# Export tales to CSV for Python processing
+write_csv(tales, "../Data/hca_tales.csv")
+write_csv(tales_sentences, "../Data/hca_tale_sentences.csv")
+write_csv(tales_words, "../Data/hca_tale_words.csv")
+```
