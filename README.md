@@ -16,3 +16,7 @@ Emotion analysis of Hans Christian Andersen fairy tales using multiple methods:
 ## Data
 
 Data will be generated from R hcandersenr package.
+
+## Folders
+
+Create folders "Output", "Data", and "Logs" at the same depth as "Scripts" to store outputs as you are running files to follow along.

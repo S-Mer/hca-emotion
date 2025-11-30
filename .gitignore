@@ -14,10 +14,13 @@
 "Logs/" 
 "Output/" 
 
-# Data file catches
+# Data files
 "*.csv" 
 "*.json"
 "*.xlsx"
 
 # IDE
 ".vscode/launch.json"
+
+# Other
+"notes.txt"

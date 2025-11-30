@@ -1,0 +1,7 @@
+## TODO: change readme to remove the requirement to manually create log/output/data folders, just mkdir automatically if not already present
+
+## TODO: automatically create user's venv? 
+
+## TODO: network viz
+
+## TODO: include year publish
