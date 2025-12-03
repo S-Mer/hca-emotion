@@ -50,6 +50,9 @@ emotion_results %>%
   theme_bw() +
   scale_fill_brewer(palette = "Set2")
 # 
+
+# If we collapse each story to its dominant emotion (average across all chunks, weight by tokens)
+
 # calculate average scores for each emotion
 emotion_results %>%
   summarise(across(c(anger, joy, sadness, fear, disgust, surprise, neutral), mean)) %>%
@@ -112,3 +115,76 @@ emotion_results %>%
 
 # Q: Would it make sense to reduce chunk sizes? what effect would this have on: uncertainty, share of emotions like surprise/anger, etc.?
 It seems like there is little to no trend in uncertainty as token count increases. Most chunks have a dominant emotion of "neutral" or "joy", with very few chunks classified as "anger", "disgust", or "surprise".
+
+# Given the overwhelmingly "short" (relative to novels) lengths of these tales, it stands to reason that the emotions which readers associate with a given tale may be largely determined by their beginnings/endings/specific climax moments rather than the most "common" emotional responses. For example in HCA we see a lot of disgust, fear, sadness, etc. Does the same hold true of endings, or do endings have resolutions which are largely associated with joy, such that most of his stories have trials and trivulations but happy endings?
+
+```{r}
+names(emotion_results)
+
+emotion_results %>%
+  view()
+
+# Reshape long so that we can make a ggplot of the amotional trajectory of a story across all emotions and chunks, with the emotion values on the y-axis, and the chunk progression on the x-axis
+emotion_long <- emotion_results %>%
+  pivot_longer(cols = c(anger, joy, sadness, fear, disgust, surprise, neutral, dominant_uncertainty), names_to = "emotion", values_to = "value")
+
+# Examine emotional trajectories. First, let's look at a scatterplot by chunk of all emotions
+plot_tale <- function(tale_name) {
+  emotion_long %>%
+    filter(tale == tale_name) %>%
+    ggplot(.) +
+      aes(x = chunk, y = value, color = emotion) +
+      geom_point() +
+      # geom_line() +
+      geom_smooth(se = FALSE) +
+      labs(title = paste("Emotional Trajectory of", tale_name),
+           x = "Chunk",
+           y = "Emotion Value") +
+      theme_minimal() +
+      scale_color_manual(values = c("sadness" = "blue",
+                                  "anger" = "red",
+                                  "disgust" = "orange",
+                                  "dominant_uncertainty" = "black",
+                                  "joy" = "green",
+                                  "fear" = "purple",
+                                  "surprise" = "yellow",
+                                  "neutral" = "gray"))
+      # scale_color_brewer(palette = "Set2")
+}
+
+plot_tale("The ugly duckling")
+plot_tale("Holger Danske")
+
+emotion_results %>% view()
+# list all tale names within emotion_results
+unique(emotion_results$tale) %>% view()
+
+# How can i set the specific colors of each emotion in the plot above? I want sadness to be blue, anger to be red, disgust to be orange, dominant_uncertainty to be black, joy to be green, fear to be purple, surprise to be yellow, and neutral to be gray.
+emotion_long %>%
+  filter(tale == "The little mermaid") %>%
+  ggplot(.) +
+    aes(x = chunk, y = value, color = emotion) +
+    geom_point() +
+    geom_line() +
+    labs(title = paste("Emotional Trajectory of", "The little mermaid"),
+         x = "Chunk",
+         y = "Emotion Value") +
+    theme_minimal() +
+    scale_color_manual(values = c("sadness" = "blue",
+                                  "anger" = "red",
+                                  "disgust" = "orange",
+                                  "dominant_uncertainty" = "black",
+                                  "joy" = "green",
+                                  "fear" = "purple",
+                                  "surprise" = "yellow",
+                                  "neutral" = "gray"))
+
+# how do you plot the values as well as the uncertainty of the dominant emotion at the same time? can you just add another y variable as long as it still fits in the same y-value range as the existing axis?
+# you
+
+ggplot(emotion_results) +
+  aes(x = chunk) + 
+  geom_point()
+  
+```
+
