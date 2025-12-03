@@ -1,0 +1,114 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-12-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Postprocessing of NLP results
+```{r}
+library(tidyverse)
+
+# Prefer minimal theme, and use color from scale_color_brewer set 2 when it's present
+
+# theme_preferences <- theme_minimal()
+```
+
+```{r}
+emotion_results <- read_csv(r"(C:\Users\smert.SAMLAPTOP\OneDrive\Documents\hca-emotion\emotion_results.csv)")
+
+# Rename the "_results" columns to remove results suffix
+emotion_results <- emotion_results %>%
+  rename_with(~ str_replace(., "_score", ""), ends_with("_score"))
+
+# Create a new column for the dominant emotion based on the highest score
+emotion_vals <- emotion_results[,c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")]
+
+emotion_results$dominant_emotion <- colnames(emotion_vals)[max.col(emotion_vals)]
+
+emotion_results <- emotion_results %>%
+  mutate(dominant_emotion_value = pmax(anger, joy, sadness, fear, disgust, surprise, neutral),
+         dominant_uncertainty = 1 - dominant_emotion_value)
+
+# emotion_results %>% view()
+```
+
+These emotion results, due to the model used, were "chunked" into segments based on their token length, as the model looks at a rolling window of text. As a result, we have multiple sets of results per tale, assuming they exceeded to maximum token allowance. A bit of an inconvenience when preparing the data, but it does let us look at smaller segments of HCA's tales and see what kinds of emotions he is primarily using in different parts of the stories.
+
+```{r}
+# Quick look at dominant emotions across all chunks. Reorder the columns from the most frequent to least frequent emotion
+emotion_results %>%
+  mutate(dominant_emotion = factor(dominant_emotion, levels = names(sort(table(dominant_emotion), decreasing = TRUE)))) %>%
+  ggplot(aes(x = dominant_emotion, fill = dominant_emotion)) +
+  geom_bar() +
+  labs(title = "Dominant Emotions Across All Tale Chunks",
+       x = "Dominant Emotion",
+       y = "Count") +
+  theme_bw() +
+  scale_fill_brewer(palette = "Set2")
+# 
+# calculate average scores for each emotion
+emotion_results %>%
+  summarise(across(c(anger, joy, sadness, fear, disgust, surprise, neutral), mean)) %>%
+  pivot_longer(everything(), names_to = "emotion", values_to = "average_score") %>%
+  ggplot(aes(x = emotion, y = average_score, fill = emotion)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Average Emotion Scores Across All Tale Chunks",
+       x = "Emotion",
+       y = "Average Score") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+
+```
+
+From this, it looks like HCA employs negative emotions by and large, with "disgust", "fear", and "sadness" being the most common dominant emotions in his tale chunks. "Joy" is among the least common dominant emotions, only surpassed by "anger" and "surprise". That said, these emotions may just be the most difficult to continue to express throughout an entire "chunk" of text - surprise, for example, is often a sudden and fleeting emotion when expressed - it might make sense that this is the least (by quite a significant amount) common dominant emotion.
+
+One question that came to my mind is, if we make an "uncertainty" metric as the inverse of the dominant emotion score, do we see any patterns in uncertainty related to token or sentence counts? What does it look like if we take the 8 "longest" tales (most chunks) and plot these metrics?
+```{r}
+# compare confidence to chunk size. are we more confident with larger chunks? look only at the 10 longest tales (those with the highest max value of the "chunk" variable)
+longest_tales <- emotion_results %>%
+  group_by(tale) %>%
+  summarise(max_chunk = max(chunk)) %>%
+  arrange(desc(max_chunk)) %>%
+  slice_head(n = 8) %>%
+  pull(tale)
+
+emotion_results %>%
+  filter(tale %in% longest_tales) %>%
+  ggplot(aes(x = sentence_count, y = dominant_uncertainty, color = tale)) +
+  geom_point() +
+  # geom_smooth(method = "loess", se = FALSE) +
+  labs(title = "Dominant Emotion Uncertainty vs. Chunk Size for Longest Tales",
+       x = "Chunk Size",
+       y = "Dominant Emotion Uncertainty") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set2")
+
+table(emotion_results$dominant_emotion)
+?pmax
+
+# Which dominant emotion has the least uncertainty on average?
+emotion_results %>%
+  group_by(dominant_emotion) %>%
+  summarise(average_uncertainty = mean(dominant_uncertainty)) %>%
+  arrange(average_uncertainty)
+
+# What are dominant emotions when tales are combined, taking the average of each chunk's values per tale?
+emotion_results %>%
+  group_by(tale) %>%
+  summarise(across(c(anger, joy, sadness, fear, disgust, surprise, neutral), mean)) %>%
+  mutate(dominant_emotion = colnames(.[,c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")])[max.col(.[, c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")])]) %>%
+  select(tale, dominant_emotion) %>%
+  arrange(tale)
+
+
+emotion_results %>% 
+  filter(tale == "\"Something\"") %>%
+  View()
+```
+
+# Q: Would it make sense to reduce chunk sizes? what effect would this have on: uncertainty, share of emotions like surprise/anger, etc.?
+It seems like there is little to no trend in uncertainty as token count increases. Most chunks have a dominant emotion of "neutral" or "joy", with very few chunks classified as "anger", "disgust", or "surprise".
