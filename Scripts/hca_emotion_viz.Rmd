@@ -18,8 +18,8 @@ library(tidyverse)
 ```
 
 ```{r}
-# emotion_results <- read_csv(r"(C:\Users\smert.SAMLAPTOP\OneDrive\Documents\hca-emotion\emotion_results.csv)")
-emotion_results <- read_csv("../emotion_results.csv")
+emotion_results <- read_csv(r"(C:\Users\smert.SAMLAPTOP\OneDrive\Documents\hca-emotion\emotion_results.csv)")
+# emotion_results <- read_csv("../emotion_results.csv")
 
 # Rename the "_results" columns to remove results suffix
 emotion_results <- emotion_results %>%
@@ -156,9 +156,9 @@ plot_tale <- function(tale_name) {
 plot_tale("The ugly duckling")
 plot_tale("Holger Danske")
 
-emotion_results %>% view()
+# emotion_results %>% view()
 # list all tale names within emotion_results
-unique(emotion_results$tale) %>% view()
+# unique(emotion_results$tale) %>% view()
 
 # How can i set the specific colors of each emotion in the plot above? I want sadness to be blue, anger to be red, disgust to be orange, dominant_uncertainty to be black, joy to be green, fear to be purple, surprise to be yellow, and neutral to be gray.
 emotion_long %>%
@@ -183,10 +183,6 @@ emotion_long %>%
 # how do you plot the values as well as the uncertainty of the dominant emotion at the same time? can you just add another y variable as long as it still fits in the same y-value range as the existing axis?
 # you
 
-ggplot(emotion_results) +
-  aes(x = chunk) + 
-  geom_point()
-  
 ```
 
 With an ultimate goal in mind to create a network visualization with similar tales clustered together, a couple of immediate methods come to mind to featurize the emotion trajectories. 
@@ -242,7 +238,7 @@ normalize_trajectory <- function(tale_data, n_points = 5) {
   )
   
   # Create normalized position for each chunk
-  chunk_positions <- (tale_chunks$chunk - 1) / (max(tale_chunks$chunk) - 1)
+  chunk_positions <- (tale_chunks$chunk) / (max(tale_chunks$chunk))
   
   for(emotion in c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")) {
     interpolated <- approx(
@@ -263,6 +259,11 @@ normalized_trajectories <- emotion_results %>%
 ```
 
 ## Cluster by emotion patterns - maybe add pca?
+
+Once we start thinking about clustering and/or networks, we can think about evaluating/featurizing them. Things like modularity, network density, clustering coefficient, centrality measures (degree, betweenness, closeness), etc. could be useful to describe the network structure. For clustering, silhouette scores, Davies-Bouldin index, or Calinski-Harabasz index could help assess cluster quality.
+
+Another factor to think about - what kind of structures might we expect to see from this collection of tales in the first place? Some tales are truly only one "chunk" long as far as an input to the transformer - for these we have no measure of emotion trajectory, essentially just one "overall" measure of emotion. Additionally, we could expect that these stories can't explore emotions nearly as deeply as stories which span 20+ "chunks" long. So we might expect to see clusters of "short and simple" tales, "long and complex" tales, and maybe some in-between. However, in an ideal world our clustering/network will also capture tales which are similar emotionally (sad tales, happy tales, sad at first but happy endings, etc.). What can we do to capture these nuances? 
+
 ```{r}
 library(cluster)
 library(factoextra)
@@ -278,8 +279,8 @@ tale_features <- normalized_trajectories %>%
   )))
 
 # K-means clustering
-set.seed(42)
-tale_clusters <- kmeans(select(tale_features, -tale), centers = 5)
+set.seed(831) #HCA
+tale_clusters <- kmeans(select(tale_features, -tale), centers = 7)
 
 # Add cluster labels back
 tale_features$cluster <- tale_clusters$cluster
@@ -293,6 +294,8 @@ fviz_cluster(tale_clusters, data = select(tale_features, -tale, -cluster),
 
 ## Narrative arc detection
 ```{r}
+# Instead of the below, we can do a plotting of the graph trajectories using PCA. What I am imagining is that we can create a PCA plot, and the points themselves will be graphs. These graphs will show the points which fall in the local area of the PCA plot, so we can visually see the trajectories of an area rather than just a grouping of points.
+
 # Define narrative arc patterns
 detect_arc_pattern <- function(tale_traj) {
   # Calculate emotional "energy" (sum of strong emotions)
