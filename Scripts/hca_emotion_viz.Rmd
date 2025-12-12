@@ -18,7 +18,8 @@ library(tidyverse)
 ```
 
 ```{r}
-emotion_results <- read_csv(r"(C:\Users\smert.SAMLAPTOP\OneDrive\Documents\hca-emotion\emotion_results.csv)")
+# emotion_results <- read_csv(r"(C:\Users\smert.SAMLAPTOP\OneDrive\Documents\hca-emotion\emotion_results.csv)")
+emotion_results <- read_csv("../emotion_results.csv")
 
 # Rename the "_results" columns to remove results suffix
 emotion_results <- emotion_results %>%
@@ -186,5 +187,396 @@ ggplot(emotion_results) +
   aes(x = chunk) + 
   geom_point()
   
+```
+
+With an ultimate goal in mind to create a network visualization with similar tales clustered together, a couple of immediate methods come to mind to featurize the emotion trajectories. 
+
+For one, we could normalize each tale to a certain number of "snapshot" points, no matter its length. For example if we have a story which is 10 "chunks" long and another which is 30 chunks long, we could interpolate both to have 20 "points" along their emotional trajectory, allowing us to compare them directly. From there, we could calculate features such as average emotion intensity, emotional direction (slope), and variability (standard deviation) for each emotion across the normalized trajectory. These features could then be used for clustering or dimensionality reduction techniques like PCA to visualize similarities between tales.
+
+For another, we could keep the existing chunk structure, and calculate features directly from the raw chunk data. This would involve computing summary statistics for each emotion across the chunks of a tale, such as mean intensity, maximum intensity, and standard deviation. Additionally, we could analyze the emotional "momentum" by looking at changes in emotion intensity between consecutive chunks. These features could also be used for clustering or PCA.
+
+Let's start by testing normalization. Even within this one task, we could choose different ways. we could set all tales to the max chunk size, in effect oversampling some tales, or we could set all tales to a fixed number of points (say 20 or something close to the median) regardless of original chunk count. Let's try the latter first.
+
+```{r}
+# 1. Normalize emotional trajectories for comparison
+# Create a function to interpolate all tales to the same number of "points" 
+# (say, 20 points) regardless of original chunk count
+
+# What does the median look like?
+median_chunk_count <- median(emotion_results %>%
+                                group_by(tale) %>%
+                                summarise(chunk_count = n()) %>%
+                                pull(chunk_count))
+
+ggplot(emotion_results %>%
+         group_by(tale) %>%
+         summarise(chunk_count = n()),
+       aes(x = chunk_count)) +
+  geom_histogram(binwidth = 1, fill = "lightblue", color = "black") +
+  geom_vline(xintercept = median_chunk_count, color = "red", linetype = "dashed") +
+  labs(title = "Distribution of Chunk Counts per Tale",
+       x = "Chunk Count",
+       y = "Number of Tales") +
+  theme_minimal()
+
+normalize_trajectory <- function(tale_data, n_points = 5) {
+  tale_chunks <- tale_data %>% arrange(chunk)
+  
+  # Check if tale has only 1 chunk - can't interpolate
+  if(nrow(tale_chunks) == 1) {
+    # Just replicate the single chunk values across all positions
+    normalized <- tibble(
+      position = seq(0, 1, length.out = n_points)
+    )
+    
+    for(emotion in c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")) {
+      normalized[[emotion]] <- rep(tale_chunks[[emotion]][1], n_points)
+    }
+    
+    return(normalized)
+  }
+  
+  # For tales with 2+ chunks, interpolate
+  normalized <- tibble(
+    position = seq(0, 1, length.out = n_points)
+  )
+  
+  # Create normalized position for each chunk
+  chunk_positions <- (tale_chunks$chunk - 1) / (max(tale_chunks$chunk) - 1)
+  
+  for(emotion in c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")) {
+    interpolated <- approx(
+      x = chunk_positions,
+      y = tale_chunks[[emotion]],
+      xout = normalized$position
+    )$y
+    normalized[[emotion]] <- interpolated
+  }
+  
+  return(normalized)
+}
+
+# Apply to all tales
+normalized_trajectories <- emotion_results %>%
+  group_by(tale) %>%
+  group_modify(~normalize_trajectory(.x))
+```
+
+## Cluster by emotion patterns - maybe add pca?
+```{r}
+library(cluster)
+library(factoextra)
+
+# Create feature matrix: each tale represented by its emotional trajectory
+tale_features <- normalized_trajectories %>%
+  group_by(tale) %>%
+  summarise(across(c(anger:neutral), list(
+    mean = mean,
+    sd = sd,
+    max = max,
+    trajectory_slope = ~coef(lm(.x ~ position))[2]  # emotional direction
+  )))
+
+# K-means clustering
+set.seed(42)
+tale_clusters <- kmeans(select(tale_features, -tale), centers = 5)
+
+# Add cluster labels back
+tale_features$cluster <- tale_clusters$cluster
+
+# Visualize with PCA
+fviz_cluster(tale_clusters, data = select(tale_features, -tale, -cluster),
+             geom = "text",
+             repel = TRUE) +
+  labs(title = "HCA Tales Clustered by Emotional Patterns")
+```
+
+## Narrative arc detection
+```{r}
+# Define narrative arc patterns
+detect_arc_pattern <- function(tale_traj) {
+  # Calculate emotional "energy" (sum of strong emotions)
+  tale_traj <- tale_traj %>%
+    mutate(
+      negative_energy = sadness + fear + disgust + anger,
+      positive_energy = joy + surprise,
+      total_energy = negative_energy + positive_energy
+    )
+  
+  # Identify pattern type based on trajectory
+  beginning <- mean(tale_traj$total_energy[1:5])
+  middle <- mean(tale_traj$total_energy[8:12])
+  end <- mean(tale_traj$total_energy[16:20])
+  
+  # Classify arc type
+  if(middle > beginning & end > middle) {
+    return("Rising Action")
+  } else if(middle < beginning & end > beginning) {
+    return("Tragedy to Triumph")  # Classic HCA!
+  } else if(middle > beginning & end < beginning) {
+    return("Rise and Fall")
+  } else if(beginning > middle & end > beginning) {
+    return("Challenge and Resolution")
+  } else {
+    return("Steady State")
+  }
+}
+
+# Apply to all tales
+arc_patterns <- normalized_trajectories %>%
+  group_by(tale) %>%
+  group_modify(~tibble(arc_pattern = detect_arc_pattern(.x)))
+```
+
+## Shiny dashboard
+```{r}
+library(shiny)
+library(plotly)
+library(shinydashboard)
+
+ui <- dashboardPage(
+  dashboardHeader(title = "HCA Emotional Analysis"),
+  
+  dashboardSidebar(
+    sidebarMenu(
+      menuItem("Tale Explorer", tabName = "explorer"),
+      menuItem("Tale Comparison", tabName = "comparison"),
+      menuItem("Clustering Analysis", tabName = "clusters"),
+      menuItem("Recommender", tabName = "recommender")
+    )
+  ),
+  
+  dashboardBody(
+    tabItems(
+      # Tale Explorer Tab
+      tabItem(
+        tabName = "explorer",
+        fluidRow(
+          box(
+            width = 4,
+            selectInput("selected_tale", "Choose a Tale:",
+                       choices = unique(emotion_results$tale))
+          ),
+          box(
+            width = 8,
+            plotlyOutput("emotional_trajectory", height = 400)
+          )
+        ),
+        fluidRow(
+          box(
+            width = 6,
+            plotlyOutput("emotion_breakdown")
+          ),
+          box(
+            width = 6,
+            valueBoxOutput("dominant_emotion_box"),
+            verbatimTextOutput("tale_summary")
+          )
+        )
+      ),
+      
+      # Comparison Tab
+      tabItem(
+        tabName = "comparison",
+        fluidRow(
+          box(
+            width = 3,
+            selectInput("tale1", "Tale 1:", choices = unique(emotion_results$tale)),
+            selectInput("tale2", "Tale 2:", choices = unique(emotion_results$tale))
+          ),
+          box(
+            width = 9,
+            plotlyOutput("comparison_plot", height = 500)
+          )
+        )
+      ),
+      
+      # Clustering Tab
+      tabItem(
+        tabName = "clusters",
+        fluidRow(
+          box(
+            width = 12,
+            plotlyOutput("cluster_viz", height = 600)
+          )
+        ),
+        fluidRow(
+          box(
+            width = 12,
+            DT::dataTableOutput("cluster_tales")
+          )
+        )
+      ),
+      
+      # Recommender Tab
+      tabItem(
+        tabName = "recommender",
+        fluidRow(
+          box(
+            width = 4,
+            selectInput("favorite_tale", "Your Favorite Tale:",
+                       choices = unique(emotion_results$tale)),
+            actionButton("recommend", "Get Recommendations", 
+                        class = "btn-primary")
+          ),
+          box(
+            width = 8,
+            h3("Recommended Tales Based on Emotional Similarity"),
+            DT::dataTableOutput("recommendations")
+          )
+        )
+      )
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  # Emotional trajectory plot
+  output$emotional_trajectory <- renderPlotly({
+    tale_data <- emotion_long %>%
+      filter(tale == input$selected_tale)
+    
+    plot_ly(tale_data, x = ~chunk, y = ~value, color = ~emotion,
+            type = 'scatter', mode = 'lines+markers',
+            colors = c("sadness" = "blue", "anger" = "red", 
+                      "disgust" = "orange", "joy" = "green",
+                      "fear" = "purple", "surprise" = "yellow",
+                      "neutral" = "gray")) %>%
+      layout(title = paste("Emotional Journey:", input$selected_tale),
+             xaxis = list(title = "Story Progression"),
+             yaxis = list(title = "Emotion Intensity"))
+  })
+  
+  # ... more server logic for other features
+}
+
+shinyApp(ui, server)
+```
+
+# Recommender system
+```{r}
+# Calculate tale similarity based on emotional profiles
+library(proxy)
+
+# Create tale-by-emotion matrix
+tale_emotion_matrix <- normalized_trajectories %>%
+  group_by(tale) %>%
+  summarise(across(anger:neutral, mean)) %>%
+  column_to_rownames("tale")
+
+# Calculate cosine similarity between all tales
+similarity_matrix <- as.matrix(simil(tale_emotion_matrix, method = "cosine"))
+
+# Recommender function
+recommend_tales <- function(favorite_tale, n_recommendations = 5) {
+  similarities <- similarity_matrix[favorite_tale, ]
+  similarities <- similarities[names(similarities) != favorite_tale]
+  
+  top_matches <- sort(similarities, decreasing = TRUE)[1:n_recommendations]
+  
+  tibble(
+    recommended_tale = names(top_matches),
+    similarity_score = round(top_matches, 3),
+    reason = "Similar emotional trajectory and intensity patterns"
+  )
+}
+
+# Test it
+recommend_tales("The ugly duckling")
+```
+
+# SQL integration database layer
+```{r}
+library(DBI)
+library(RSQLite)
+
+# Create SQLite database
+con <- dbConnect(SQLite(), "hca_emotions.db")
+
+# Write tables
+dbWriteTable(con, "emotion_scores", emotion_results, overwrite = TRUE)
+dbWriteTable(con, "normalized_trajectories", normalized_trajectories, overwrite = TRUE)
+dbWriteTable(con, "tale_clusters", tale_features, overwrite = TRUE)
+
+# Create indexes for performance
+dbExecute(con, "CREATE INDEX idx_tale ON emotion_scores(tale)")
+dbExecute(con, "CREATE INDEX idx_chunk ON emotion_scores(chunk)")
+
+# Example complex queries to demonstrate SQL skills
+query_top_emotional_tales <- "
+  SELECT tale, 
+         AVG(anger + fear + sadness + disgust) as avg_negative_emotion,
+         COUNT(*) as chunk_count
+  FROM emotion_scores
+  GROUP BY tale
+  HAVING chunk_count > 5
+  ORDER BY avg_negative_emotion DESC
+  LIMIT 10
+"
+
+dbGetQuery(con, query_top_emotional_tales)
+
+# Window function example
+query_emotional_momentum <- "
+  SELECT tale, chunk,
+         sadness,
+         LAG(sadness) OVER (PARTITION BY tale ORDER BY chunk) as prev_sadness,
+         sadness - LAG(sadness) OVER (PARTITION BY tale ORDER BY chunk) as sadness_change
+  FROM emotion_scores
+  ORDER BY tale, chunk
+"
+
+dbGetQuery(con, query_emotional_momentum)
+```
+
+## Heatmap of emotional patterns
+```{r}
+library(pheatmap)
+
+# Create heatmap showing all tales' emotional profiles
+tale_emotion_summary <- emotion_results %>%
+  group_by(tale) %>%
+  summarise(across(anger:neutral, mean)) %>%
+  column_to_rownames("tale")
+
+pheatmap(tale_emotion_summary,
+         scale = "column",
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         main = "HCA Tales: Emotional Heatmap")
+```
+
+## Network viz
+```{r}
+library(igraph)
+library(ggraph)
+
+# Create network where tales are connected if similarity > threshold
+threshold <- 0.7
+edge_list <- which(similarity_matrix > threshold & 
+                  similarity_matrix < 1, arr.ind = TRUE)
+
+edges <- data.frame(
+  from = rownames(similarity_matrix)[edge_list[,1]],
+  to = colnames(similarity_matrix)[edge_list[,2]],
+  weight = similarity_matrix[edge_list]
+)
+
+# Create graph
+tale_network <- graph_from_data_frame(edges, directed = FALSE)
+
+# Add cluster membership as node attribute
+V(tale_network)$cluster <- tale_features$cluster[match(V(tale_network)$name, 
+                                                       tale_features$tale)]
+
+# Visualize
+ggraph(tale_network, layout = 'fr') +
+  geom_edge_link(aes(alpha = weight), show.legend = FALSE) +
+  geom_node_point(aes(color = factor(cluster)), size = 5) +
+  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
+  theme_graph() +
+  labs(title = "HCA Tale Network: Emotional Similarity Connections",
+       color = "Tale Cluster")
 ```
 

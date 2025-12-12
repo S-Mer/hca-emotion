@@ -23,6 +23,9 @@ from nltk.tokenize import sent_tokenize
 #                   SamLowe/roberta-base-go_emotions   
 #                   cardiffnlp/twitter-roberta-base-sentiment-latest
 
+tales = pd.read_csv("Data/hca_tales.csv")
+pred_texts = tales['text'].tolist()
+
 ### Adding in own code to chunk text appropriately for model input length limits
 def chunk_text(df=tales, title_col='tale', text_col='text', max_length=510):
     """
@@ -146,8 +149,6 @@ trainer = Trainer(model=model)
 
 # create list of texts (can be imported from .csv, .xls etc.)
 # pred_texts = ['I like that', 'That is annoying', 'This is great!', 'Wouldn´t recommend it.']
-tales = pd.read_csv("Data/hca_tales.csv")
-pred_texts = tales['text'].tolist()
 
 chunks_df = chunk_text(tales, 'book', 'text')
 
