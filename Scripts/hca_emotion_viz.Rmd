@@ -34,8 +34,92 @@ emotion_results <- emotion_results %>%
   mutate(dominant_emotion_value = pmax(anger, joy, sadness, fear, disgust, surprise, neutral),
          dominant_uncertainty = 1 - dominant_emotion_value)
 
-# emotion_results %>% view()
+# Add publication dates and a couple of other metadata fields (is the date an approximation? what was the original language?) from the hcandersenr package
+library(hcandersenr)
+emotion_results <- emotion_results %>%
+  left_join(EK %>% select(date, approximate, org_language, name_en), by = c("tale" = "name_en"))
+
+# Missings check from merge
+emotion_results %>%
+  summarise(
+    total_tales = n(),
+    missing_dates = sum(is.na(date)),
+    missing_approx = sum(is.na(approximate)),
+    missing_original_lang = sum(is.na(org_language)),
+    # approximate_dates = sum(approximate, na.rm = TRUE)
+  )
+
+# Show a sample timeline of tales with their publication dates
+emotion_results %>%
+  distinct(tale, date) %>%
+  arrange(date) %>%
+  ggplot(aes(x = date, y = reorder(tale, date))) +
+  geom_point(color = "steelblue") +
+  labs(title = "Publication Timeline of HCA Tales",
+       x = "Publication Date",
+       y = "Tale") +
+  theme_minimal()
+
+emotion_results %>% names()
+
+# thinking aloud: the final timeline viz on the website could be akin to this, with coloration representing "dominant" or perhaps "final dominant" emotion for each tale, and size of bubble or a different axis could represent story length/amount of chunks/amt chars/amt words/etc. another idea would be to create one "point" per year with a color representing overall dominant emotion of the entire year rather than by individual tale. so a year with 7 tales, 4 of which are predominantly joyous would be colored by joy. you could hover this and see the tales and their individual colors or timelines.
 ```
+
+I already know and am imagining painting a timeline of HCA's tales. This would be an intuitive, interesting way to examine some high-level questions. During what periods of his life was he most productive in writing? Were his most famous tales all written during a particular phase? Are they similar emotionally? Did his emotional tone change over time, perhaps reflecting his personal life circumstances? Let's prepare to visualize this using D3.js later on.
+
+```{r}
+# Prepare data for timeline visualization
+library(jsonlite)
+library(lubridate)
+
+# Extract just the year from your Date column
+timeline_data <- emotion_results %>%
+  group_by(tale, date, approximate, org_language) %>%
+  summarise(
+    # Extract year from Date
+    year = year(date[1]),  # Use year() function from lubridate
+    
+    # Your existing emotion aggregations
+    sadness = mean(sadness),
+    joy = mean(joy),
+    fear = mean(fear),
+    anger = mean(anger),
+    disgust = mean(disgust),
+    surprise = mean(surprise),
+    neutral = mean(neutral),
+    
+    num_chunks = n(),
+    total_tokens = sum(token_count),
+    
+    emotion_purity = max(sadness, joy, fear, anger, disgust, surprise, neutral) - 
+                     median(c(sadness, joy, fear, anger, disgust, surprise, neutral)),
+    
+    dominant_emotion = names(which.max(c(
+      sadness = mean(sadness),
+      joy = mean(joy), 
+      fear = mean(fear),
+      anger = mean(anger),
+      disgust = mean(disgust),
+      surprise = mean(surprise),
+      neutral = mean(neutral)
+    ))),
+    
+    dominant_value = max(sadness, joy, fear, anger, disgust, surprise, neutral)
+  ) %>%
+  ungroup()
+
+# Now export with 'year' instead of 'date'
+timeline_json <- timeline_data %>%
+  select(-date) %>%  # Remove the full date
+  toJSON(pretty = TRUE, auto_unbox = TRUE)
+
+write(timeline_json, 'data/timeline_data.json')
+
+# Verify
+test <- fromJSON('data/timeline_data.json')
+head(test$year)  # Should show: 1859, 1837, etc.
+```
+
 
 These emotion results, due to the model used, were "chunked" into segments based on their token length, as the model looks at a rolling window of text. As a result, we have multiple sets of results per tale, assuming they exceeded to maximum token allowance. A bit of an inconvenience when preparing the data, but it does let us look at smaller segments of HCA's tales and see what kinds of emotions he is primarily using in different parts of the stories.
 

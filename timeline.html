@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hans Christian Andersen Timeline</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+      body {
+        margin: 0;
+        padding: 20px;
+        background-color: #1a1a1a;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #ffffff;
+      }
+
+      #timeline-container {
+        width: 100%;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        text-align: center;
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+        color: #ffffff;
+      }
+
+      .subtitle {
+        text-align: center;
+        font-size: 1rem;
+        color: #aaaaaa;
+        margin-bottom: 2rem;
+      }
+
+      /* Timeline styles */
+      .timeline-line {
+        stroke: #666666;
+        stroke-width: 3;
+      }
+
+      .branch-line {
+        stroke: #888888;
+        stroke-width: 1.5;
+        opacity: 0.6;
+      }
+
+      .tale-circle {
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .tale-circle:hover {
+        stroke: #ffffff;
+        stroke-width: 3;
+      }
+
+      .tale-circle-approximate {
+        /* Will use diamonds for approximate dates */
+      }
+
+      .year-label {
+        fill: #aaaaaa;
+        font-size: 12px;
+        text-anchor: middle;
+      }
+
+      .annotation {
+        fill: #888888;
+        font-size: 11px;
+        font-style: italic;
+      }
+
+      /* Tooltip */
+      .tooltip {
+        position: absolute;
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.9);
+        border: 1px solid #444;
+        border-radius: 8px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s;
+        max-width: 300px;
+        z-index: 1000;
+      }
+
+      .tooltip-title {
+        font-weight: bold;
+        font-size: 14px;
+        margin-bottom: 8px;
+        color: #ffffff;
+      }
+
+      .tooltip-content {
+        font-size: 12px;
+        color: #cccccc;
+        line-height: 1.5;
+      }
+
+      .tooltip-emotion-bar {
+        display: flex;
+        align-items: center;
+        margin: 4px 0;
+      }
+
+      .tooltip-emotion-label {
+        width: 80px;
+        font-size: 11px;
+      }
+
+      .tooltip-emotion-value {
+        flex: 1;
+        height: 12px;
+        background: #333;
+        border-radius: 3px;
+        overflow: hidden;
+        margin: 0 8px;
+      }
+
+      .tooltip-emotion-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+      }
+
+      .tooltip-emotion-percent {
+        font-size: 11px;
+        width: 35px;
+        text-align: right;
+      }
+
+      /* Legend */
+      .legend {
+        margin-top: 30px;
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .legend-circle {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+      }
+
+      .legend-label {
+        font-size: 13px;
+        color: #cccccc;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="timeline-container">
+      <h1>Hans Christian Andersen's Tales</h1>
+      <p class="subtitle">A Lifetime of Stories (1805-1875)</p>
+      <svg id="timeline"></svg>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script src="js/timeline.js"></script>
+  </body>
+</html>
