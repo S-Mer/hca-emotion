@@ -667,3 +667,346 @@ ggraph(tale_network, layout = 'fr') +
        color = "Tale Cluster")
 ```
 
+12/16/25:
+
+When working with the timeline, one of the first things you can see is that the majority of tales are classified as majority "disgust". Maybe not the most prominent emotion you'd expect from a notorious fairy tale writer. Maybe not everything is sunshine and rainbows! Let's dig into this a little deeper numerically.
+
+```{r}
+# Check dominant emotion distribution
+emotion_results %>%
+  group_by(tale) %>%
+  slice(1) %>%  # One row per tale
+  count(dominant_emotion, sort = TRUE) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+# Check if disgust is really dominant or just slightly ahead
+tale_emotions <- emotion_results %>%
+  group_by(tale) %>%
+  summarise(
+    across(c(anger, joy, sadness, fear, disgust, surprise, neutral), mean),
+    dominant = names(which.max(c(anger[1], joy[1], sadness[1], fear[1], 
+                                  disgust[1], surprise[1], neutral[1])))
+  )
+
+# How much higher is disgust than second place?
+tale_emotions %>%
+  rowwise() %>%
+  mutate(
+    disgust_margin = disgust - max(anger, joy, sadness, fear, surprise, neutral, -disgust)
+  ) %>%
+  filter(dominant == "disgust") %>%
+  summarise(
+    median_margin = median(disgust_margin),
+    mean_margin = mean(disgust_margin)
+  )
+
+# What are some high-disgust tales?
+tale_emotions %>%
+  filter(dominant == "disgust") %>%
+  arrange(desc(disgust)) %>%
+  select(tale, disgust, joy, sadness, fear) %>%
+  head(10)
+```
+
+## Most Likely Explanations
+
+### 1. **Model Training Bias** (Most Likely)
+
+DistilRoBERTa was trained on **modern text** (likely Twitter, Reddit, product reviews). Fairy tale language from the 1800s is **out of distribution**:
+
+**What triggers "disgust" in modern text:**
+- Gross/unpleasant descriptions
+- Moral outrage
+- Negative physical descriptions
+- Criticism/condemnation
+
+**What's common in HCA tales:**
+- Physical transformations ("her feet felt like knives")
+- Suffering descriptions ("starving child")
+- Moral lessons about vanity/cruelty
+- Gothic imagery (witches, death, decay)
+
+**The model might be confusing:**
+- Fairy tale darkness → disgust
+- Moral judgment language → disgust  
+- Archaic negative descriptions → disgust
+
+### 2. **Fairy Tale Genre Characteristics**
+
+HCA tales often include:
+
+"The Little Mermaid": Pain, transformation, sacrifice
+"The Little Match Girl": Freezing, starvation, death
+"The Red Shoes": Feet cut off, punishment
+"The Ugly Duckling": Bullying, rejection, suffering
+
+How are his tales distributed throughout his publishing history? For example, maybe we can explore emotion over time at a high level by showing a stream or river or flow graph of shorts, showing dominant emotion as a percentage of tales published each year.
+
+```{r}
+# Check tales per year
+publishing_distribution <- timeline_data %>%
+  distinct(tale, year) %>%
+  count(year, sort = TRUE)
+
+# Summary stats
+publishing_distribution %>%
+  summarise(
+    mean_per_year = mean(n),
+    median_per_year = median(n),
+    max_year = year[which.max(n)],
+    max_tales = max(n),
+    years_with_5plus = sum(n >= 5),
+    tales_in_5plus_years = sum(n[n >= 5]),
+    total_tales = sum(n),
+    pct_in_productive_years = 100 * sum(n[n >= 5]) / sum(n)
+  )
+
+# Visualize distribution
+library(ggplot2)
+
+ggplot(publishing_distribution, aes(x = year, y = n)) +
+  geom_col(fill = "#4A90E2", alpha = 0.8) +
+  geom_hline(yintercept = 3, linetype = "dashed", color = "red") +
+  labs(
+    title = "Tales Published Per Year",
+    subtitle = "Red line shows threshold of 3+ tales",
+    x = "Year", 
+    y = "Number of Tales"
+  ) +
+  theme_minimal()
+
+# Check emotion distribution by year
+emotion_by_year <- timeline_data %>%
+  distinct(tale, year, dominant_emotion) %>%
+  count(year, dominant_emotion) %>%
+  group_by(year) %>%
+  mutate(
+    total_that_year = sum(n),
+    percentage = n / total_that_year * 100
+  ) %>%
+  arrange(year, desc(percentage))
+
+# Show productive years
+emotion_by_year %>%
+  filter(total_that_year >= 5) %>%
+  arrange(year, desc(percentage)) %>% view()
+
+library(tidyverse)
+
+# Create the base data for ALL visualizations
+emotion_by_year <- timeline_data %>%
+  distinct(tale, year, dominant_emotion) %>%
+  count(year, dominant_emotion) %>%
+  group_by(year) %>%
+  mutate(
+    total_tales = sum(n),
+    percentage = n / sum(n) * 100
+  ) %>%
+  ungroup()
+
+# Check distribution
+publishing_summary <- emotion_by_year %>%
+  group_by(year) %>%
+  summarise(total_tales = first(total_tales)) %>%
+  arrange(desc(total_tales))
+
+print(publishing_summary)
+
+# Summary statistics
+cat("\n=== PUBLISHING PATTERN ===\n")
+cat("Total years with tales:", n_distinct(emotion_by_year$year), "\n")
+cat("Years with 5+ tales:", sum(publishing_summary$total_tales >= 5), "\n")
+cat("Most productive year:", publishing_summary$year[1], 
+    "with", publishing_summary$total_tales[1], "tales\n")
+cat("Median tales/year:", median(publishing_summary$total_tales), "\n")
+
+# Define emotion colors
+emotion_colors <- c(
+  sadness = '#4A90E2',
+  joy = '#7ED321',
+  anger = '#D0021B',
+  fear = '#9013FE',
+  disgust = '#F5A623',
+  surprise = '#F8E71C',
+  neutral = '#9B9B9B'
+)
+
+# Works with any data density
+ggplot(emotion_by_year, aes(x = year, y = percentage, fill = dominant_emotion)) +
+  geom_area(alpha = 0.8) +
+  scale_fill_manual(values = emotion_colors) +
+  labs(
+    title = "Emotional Composition of Andersen's Tales Over Time",
+    subtitle = "Percentage of tales by dominant emotion",
+    x = "Year",
+    y = "Percentage of Tales (%)",
+    fill = "Dominant Emotion"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right",
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("emotion_area_chart.png", width = 12, height = 6, dpi = 300)
+
+# Filter to only years with multiple tales (cleaner)
+productive_years <- emotion_by_year %>%
+  filter(total_tales >= 3)  # Adjust threshold as needed
+
+# Order the emotions in the chart so that disgust is on the bottom, then fear, then sadness, then anger, then neutral, then surprise, then joy.
+
+emotion_order <- rev(c("disgust", "fear", "sadness", "anger", "neutral", "surprise", "joy"))
+
+ggplot(productive_years, aes(x = factor(year), y = percentage, fill = factor(dominant_emotion, levels = emotion_order))) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(values = emotion_colors) +
+  labs(
+    title = "Emotional Distribution in Productive Years",
+    subtitle = paste("Years with 3+ tales (n =", n_distinct(productive_years$year), "years)"),
+    x = "Year",
+    y = "Percentage of Tales",
+    fill = "Dominant Emotion"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+ggsave("emotion_bar_chart.png", width = 14, height = 6, dpi = 300)
+
+### HEATMAP
+# Complete the data for all year/emotion combinations
+heatmap_data <- emotion_by_year %>%
+  complete(year = full_seq(year, 1), dominant_emotion, 
+           fill = list(n = 0, percentage = 0, total_tales = 0))
+
+ggplot(heatmap_data, aes(x = year, y = dominant_emotion, fill = n)) +
+  geom_tile(color = "grey20", size = 0.5) +
+  scale_fill_gradient(
+    low = "#1a1a1a", 
+    high = "#F8E71C",
+    na.value = "grey10",
+    name = "Tales"
+  ) +
+  labs(
+    title = "Emotion Heatmap: Tale Count by Year",
+    x = "Year",
+    y = "Dominant Emotion"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+ggsave("emotion_heatmap.png", width = 14, height = 6, dpi = 300)
+
+# PROPORTIONAL BUBBLE
+# Cool alternative - bubbles sized by tale count
+ggplot(emotion_by_year, aes(x = year, y = dominant_emotion)) +
+  geom_point(aes(size = n, color = dominant_emotion), alpha = 0.6) +
+  scale_size_continuous(range = c(2, 15), name = "Tale Count") +
+  scale_color_manual(values = emotion_colors) +
+  labs(
+    title = "Emotion Distribution Timeline",
+    subtitle = "Bubble size = number of tales",
+    x = "Year",
+    y = "Dominant Emotion"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("emotion_bubbles.png", width = 14, height = 6, dpi = 300)
+
+```
+
+
+# Manually add story AKA's
+
+```{r}
+# In R preprocessing
+tale_aliases <- tribble(
+  ~tale, ~aliases,
+  "The Little Mermaid", "Mermaid, Little Mermaid",
+  "The Ugly Duckling", "Duckling, Ugly Duckling",
+  "The Little Match Girl", "Match Girl, Little Match Girl"
+)
+
+# Export to JSON
+write_json(tale_aliases, "data/tale_aliases.json")
+```
+
+// In JS
+async function loadAliases() {
+  const aliases = await d3.json("data/tale_aliases.json");
+  
+  // Create reverse lookup
+  aliasMap = new Map();
+  aliases.forEach(({ tale, aliases }) => {
+    const aliasList = aliases.split(',').map(a => a.trim().toLowerCase());
+    aliasList.forEach(alias => aliasMap.set(alias, tale));
+  });
+}
+
+// In search function
+function searchWithAliases(query) {
+  query = query.toLowerCase();
+  
+  // Direct match
+  let matches = data.filter(d => d.tale.toLowerCase().includes(query));
+  
+  // Alias match
+  if (aliasMap.has(query)) {
+    const canonicalTale = aliasMap.get(query);
+    const aliasMatches = data.filter(d => d.tale === canonicalTale);
+    matches = [...matches, ...aliasMatches];
+  }
+  
+  return [...new Set(matches)]; // Remove duplicates
+}
+```
+
+---
+
+## Recommended Page Structure
+```
+┌─────────────────────────────────────────────────┐
+│  TITLE: Hans Christian Andersen's Tales         │
+│  Subtitle: A Lifetime of Stories (1805-1875)   │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  SEARCH BAR                                      │
+│  [Search tales...]  [Clear]                     │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  EMOTIONAL FLOW SECTION (Optional)              │
+│  Stacked area chart showing emotion             │
+│  distribution by year                           │
+│  - Interactive (click year to filter below)     │
+│  - Legend showing emotion colors                │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  MAIN TIMELINE                                   │
+│  Your current stacked timeline with:            │
+│  - Tales as circles/diamonds                    │
+│  - Color by emotion                             │
+│  - Size by length                               │
+│  - Opacity by certainty                         │
+│  - Biographical context bands                   │
+└─────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────┐
+│  LEGEND                                          │
+│  - Emotion colors                               │
+│  - Shape meanings                               │
+│  - Interaction instructions                     │
+└─────────────────────────────────────────────────┘

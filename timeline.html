@@ -161,6 +161,41 @@
     <div id="timeline-container">
       <h1>Hans Christian Andersen's Tales</h1>
       <p class="subtitle">A Lifetime of Stories (1805-1875)</p>
+
+      <button
+        id="reset-zoom"
+        style="
+          position: absolute;
+          top: 80px;
+          right: 80px;
+          padding: 8px 16px;
+          background: #333;
+          border: 1px solid #555;
+          color: white;
+          cursor: pointer;
+          border-radius: 4px;
+        "
+      >
+        Reset View
+      </button>
+
+      <!-- In your HTML -->
+      <div id="search-container" style="margin-bottom: 20px">
+        <input
+          type="text"
+          id="tale-search"
+          placeholder="Search tales (e.g., 'Mermaid', 'Duckling', 'Match')..."
+          style="width: 300px; padding: 8px; font-size: 14px"
+        />
+        <button id="clear-search" style="padding: 8px 16px; margin-left: 8px">
+          Clear
+        </button>
+        <div
+          id="search-results"
+          style="margin-top: 8px; font-size: 12px; color: #aaa"
+        ></div>
+      </div>
+
       <svg id="timeline"></svg>
       <div class="legend" id="legend"></div>
     </div>
