@@ -18,15 +18,205 @@ const emotionColors = {
 };
 
 // Sort order for emotions (for visual grouping)
+// From timeline upward: disgust -> fear -> sadness -> anger -> neutral -> surprise -> joy
 const emotionOrder = {
-  joy: 1,
-  surprise: 2,
-  neutral: 3,
-  sadness: 4,
-  fear: 5,
-  anger: 6,
-  disgust: 7,
+  disgust: 1,
+  fear: 2,
+  sadness: 3,
+  anger: 4,
+  neutral: 5,
+  surprise: 6,
+  joy: 7,
 };
+
+// Global variables for search functionality
+let taleGroups;
+let g;
+let talesWithPositions;
+
+function createAbbreviatedTimeScale(width) {
+  // Define the time segments we want to show
+  // Visual spacing: make each 15-year period the same width (80px)
+  const segmentWidth = 80;
+  const gapWidth = 50; // Space for zigzag breaks
+
+  const timeSegments = [
+    {
+      period: "birth",
+      start: 1805,
+      end: 1805,
+      displayStart: 0,
+      displayEnd: segmentWidth,
+      yearMarkers: [], // No year marker - will use Birth life event instead
+    },
+    {
+      period: "early",
+      start: 1820,
+      end: 1834,
+      displayStart: segmentWidth + gapWidth,
+      displayEnd: segmentWidth + gapWidth + segmentWidth,
+      yearMarkers: [{ year: 1820, displayX: segmentWidth + gapWidth }],
+    },
+    {
+      period: "productive",
+      start: 1835,
+      end: 1875,
+      displayStart: 2 * segmentWidth + 2 * gapWidth,
+      displayEnd: width,
+      yearMarkers: [], // Will be calculated dynamically
+    },
+  ];
+
+  // Create mapping functions
+  function yearToDisplay(year) {
+    for (let segment of timeSegments) {
+      if (year >= segment.start && year <= segment.end) {
+        const segmentProgress =
+          (year - segment.start) / (segment.end - segment.start);
+        return (
+          segment.displayStart +
+          segmentProgress * (segment.displayEnd - segment.displayStart)
+        );
+      }
+    }
+    return null; // Year not in any segment
+  }
+
+  return { yearToDisplay, timeSegments };
+}
+
+function drawTimelineWithBreaks(g, timeSegments, timelineY, height) {
+  // Calculate year markers for the productive period
+  const productiveSegment = timeSegments[2];
+  const yearInterval = 5; // Show every 5 years
+
+  for (let year = 1835; year <= 1875; year += yearInterval) {
+    const progress =
+      (year - productiveSegment.start) /
+      (productiveSegment.end - productiveSegment.start);
+    const segmentLength =
+      productiveSegment.displayEnd - productiveSegment.displayStart;
+    const displayX = productiveSegment.displayStart + progress * segmentLength;
+    productiveSegment.yearMarkers.push({ year, displayX });
+  }
+
+  // Draw each timeline segment
+  timeSegments.forEach((segment) => {
+    // Main timeline line
+    g.append("line")
+      .attr("class", "timeline-segment")
+      .attr("x1", segment.displayStart)
+      .attr("x2", segment.displayEnd)
+      .attr("y1", timelineY)
+      .attr("y2", timelineY)
+      .attr("stroke", "#666")
+      .attr("stroke-width", 3);
+
+    // Draw year markers with vertical lines
+    segment.yearMarkers.forEach((marker) => {
+      // Vertical indicator line
+      g.append("line")
+        .attr("x1", marker.displayX)
+        .attr("x2", marker.displayX)
+        .attr("y1", timelineY - 10)
+        .attr("y2", timelineY + 10)
+        .attr("stroke", "#555")
+        .attr("stroke-width", 1.5);
+
+      // Year label
+      g.append("text")
+        .attr("x", marker.displayX)
+        .attr("y", timelineY + 30)
+        .attr("text-anchor", "middle")
+        .attr("fill", "#aaa")
+        .attr("font-size", "11px")
+        .attr("font-weight", "bold")
+        .text(marker.year);
+    });
+  });
+
+  // Draw break indicators
+  for (let i = 0; i < timeSegments.length - 1; i++) {
+    const currentEnd = timeSegments[i].displayEnd;
+    const nextStart = timeSegments[i + 1].displayStart;
+    const gapWidth = nextStart - currentEnd;
+    const breakCenter = currentEnd + gapWidth / 2;
+
+    // Calculate zigzag dimensions symmetrically
+    const zigzagWidth = gapWidth * 0.6; // Use 60% of gap for zigzag
+    const zigzagStart = breakCenter - zigzagWidth / 2;
+    const zigzagEnd = breakCenter + zigzagWidth / 2;
+    const zigHeight = 10;
+
+    // Zigzag break symbol - perfectly centered
+    const zigzag = `M ${zigzagStart},${timelineY - zigHeight}
+                   L ${breakCenter - zigzagWidth / 6},${timelineY + zigHeight}
+                   L ${breakCenter},${timelineY - zigHeight}
+                   L ${breakCenter + zigzagWidth / 6},${timelineY + zigHeight}
+                   L ${zigzagEnd},${timelineY - zigHeight}`;
+
+    g.append("path")
+      .attr("d", zigzag)
+      .attr("stroke", "#666")
+      .attr("stroke-width", 2)
+      .attr("fill", "none");
+
+    // Break label
+    g.append("text")
+      .attr("x", breakCenter)
+      .attr("y", timelineY + 30)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#888")
+      .attr("font-size", "10px")
+      .attr("font-style", "italic")
+      .text("...");
+  }
+
+  // Add major life events at correct positions
+  const lifeEvents = [
+    {
+      year: 1805,
+      label: "Birth",
+      shape: "cross",
+      color: "#888",
+      displayX: timeSegments[0].displayStart, // Start of timeline
+    },
+    {
+      year: 1875,
+      label: "Death",
+      shape: "cross",
+      color: "#888",
+      displayX: timeSegments[2].displayEnd, // End of timeline
+    },
+  ];
+
+  lifeEvents.forEach((event) => {
+    // Cross for birth and death
+    const crossSize = 7;
+    g.append("path")
+      .attr(
+        "d",
+        `M ${event.displayX - crossSize},${timelineY} L ${
+          event.displayX + crossSize
+        },${timelineY} M ${event.displayX},${timelineY - crossSize} L ${
+          event.displayX
+        },${timelineY + crossSize}`
+      )
+      .attr("stroke", event.color)
+      .attr("stroke-width", 3)
+      .attr("stroke-linecap", "round");
+
+    // Label
+    g.append("text")
+      .attr("x", event.displayX)
+      .attr("y", timelineY - 15)
+      .attr("text-anchor", "middle")
+      .attr("fill", "#fff")
+      .attr("font-size", "11px")
+      .attr("font-weight", "bold")
+      .text(event.label);
+  });
+}
 
 async function init() {
   // Load data
@@ -55,7 +245,7 @@ async function init() {
   const containerWidth = container.node().getBoundingClientRect().width;
 
   const width = containerWidth - config.margin.left - config.margin.right;
-  const height = 800 - config.margin.top - config.margin.bottom; // Taller for upward stacking
+  const height = 800 - config.margin.top - config.margin.bottom;
   const timelineY = height; // TIMELINE AT BOTTOM
 
   const svg = d3
@@ -63,55 +253,53 @@ async function init() {
     .attr("width", containerWidth)
     .attr("height", 800);
 
-  const g = svg
+  g = svg
     .append("g")
     .attr(
       "transform",
       `translate(${config.margin.left}, ${config.margin.top})`
     );
 
-  // Create scales
-  const xScale = d3.scaleLinear().domain([1805, 1875]).range([0, width]);
+  // Create abbreviated scale
+  const { yearToDisplay, timeSegments } = createAbbreviatedTimeScale(width);
+
+  // Filter data to only include years in our segments
+  const validData = data.filter((d) => yearToDisplay(d.year) !== null);
 
   const sizeScale = d3
     .scaleSqrt()
-    .domain(d3.extent(data, (d) => d.num_chunks))
+    .domain(d3.extent(validData, (d) => d.num_chunks))
     .range([config.circleRadius, config.maxCircleRadius]);
 
   // Add biographical context
-  addBiographicalContext(g, xScale, timelineY, width, height);
+  // addBiographicalContext(g, timeSegments, timelineY, width, height);
 
-  // Draw main timeline at bottom
-  g.append("line")
-    .attr("class", "timeline-line")
-    .attr("x1", 0)
-    .attr("x2", width)
-    .attr("y1", timelineY)
-    .attr("y2", timelineY)
-    .attr("stroke", "#666")
-    .attr("stroke-width", 3);
+  // Draw main timeline with breaks
+  drawTimelineWithBreaks(g, timeSegments, timelineY, height);
 
-  // Group tales by year
-  const talesByYear = d3.group(data, (d) => Math.round(d.year));
+  // Group tales by display position
+  const talesByDisplayX = d3.group(validData, (d) =>
+    Math.round(yearToDisplay(d.year))
+  );
 
   // Calculate positions with smart sorting
-  const talesWithPositions = [];
+  talesWithPositions = [];
 
-  talesByYear.forEach((tales, year) => {
+  talesByDisplayX.forEach((tales, displayX) => {
     // SORT TALES WITHIN EACH YEAR
-    // Priority: 1) Certain dates first, 2) By emotion, 3) By size (small to large)
+    // Order from timeline upward: disgust -> fear -> sadness -> anger -> neutral -> surprise -> joy
     const sortedTales = tales.sort((a, b) => {
-      // 1. Confirmed dates before approximate
-      if (a.approximate !== b.approximate) {
-        return a.approximate ? 1 : -1;
-      }
-
-      // 2. Group by emotion (creates color bands)
+      // 1. Group by emotion (primary sort)
       const emotionDiff =
         emotionOrder[a.dominant_emotion] - emotionOrder[b.dominant_emotion];
       if (emotionDiff !== 0) return emotionDiff;
 
-      // 3. Smaller tales first (creates pyramid effect)
+      // 2. Certainty (secondary sort) - confirmed dates before approximate
+      if (a.approximate !== b.approximate) {
+        return a.approximate ? 1 : -1;
+      }
+
+      // 3. Size (tertiary sort) - smaller tales first
       return a.num_chunks - b.num_chunks;
     });
 
@@ -119,8 +307,6 @@ async function init() {
     sortedTales.forEach((tale, index) => {
       const taleSize = sizeScale(tale.num_chunks);
 
-      // Stack upward: first tale just above timeline, each subsequent tale stacks higher
-      // Add extra spacing based on previous tale's size
       let cumulativeHeight = 0;
       for (let i = 0; i < index; i++) {
         const prevSize = sizeScale(sortedTales[i].num_chunks);
@@ -128,7 +314,7 @@ async function init() {
       }
 
       tale.y = timelineY - (taleSize + cumulativeHeight + 10); // Stack upward
-      tale.x = xScale(year);
+      tale.x = displayX;
       tale.size = taleSize;
 
       talesWithPositions.push(tale);
@@ -156,7 +342,7 @@ async function init() {
   const tooltip = d3.select("#tooltip");
 
   // Draw tale groups
-  const taleGroups = g
+  taleGroups = g
     .selectAll(".tale-group")
     .data(talesWithPositions)
     .join("g")
@@ -229,160 +415,117 @@ async function init() {
       console.log("Clicked:", d.tale);
     });
 
-  // Draw axis at bottom
-  const xAxis = d3
-    .axisBottom(xScale)
-    .tickFormat(d3.format("d"))
-    .tickValues([1805, 1820, 1835, 1850, 1865, 1875])
-    .tickSize(10);
-
-  g.append("g")
-    .attr("class", "axis")
-    .attr("transform", `translate(0, ${timelineY})`)
-    .call(xAxis)
-    .call((g) => g.select(".domain").attr("stroke", "#666"))
-    .call((g) => g.selectAll(".tick line").attr("stroke", "#666"))
-    .call((g) =>
-      g.selectAll(".tick text").attr("fill", "#aaaaaa").attr("y", 15)
-    );
-
   // Draw legend
   drawLegend();
+
+  // Initialize search functionality
+  initSearch();
 
   console.log("Visualization complete!");
 }
 
-function createEmotionalFlowChart() {
-  // Group tales by year and emotion
-  const emotionsByYear = d3.group(data, (d) => d.year);
+// Search functionality
+function initSearch() {
+  const searchInput = d3.select("#tale-search");
+  const clearButton = d3.select("#clear-search");
+  const resultsDiv = d3.select("#search-results");
 
-  const flowData = Array.from(emotionsByYear, ([year, tales]) => {
-    const emotionCounts = {
-      year: year,
-      sadness: tales.filter((t) => t.dominant_emotion === "sadness").length,
-      joy: tales.filter((t) => t.dominant_emotion === "joy").length,
-      fear: tales.filter((t) => t.dominant_emotion === "fear").length,
-      anger: tales.filter((t) => t.dominant_emotion === "anger").length,
-      disgust: tales.filter((t) => t.dominant_emotion === "disgust").length,
-      surprise: tales.filter((t) => t.dominant_emotion === "surprise").length,
-      neutral: tales.filter((t) => t.dominant_emotion === "neutral").length,
-    };
-    return emotionCounts;
+  searchInput.on("input", function () {
+    const query = this.value.toLowerCase().trim();
+
+    if (query.length === 0) {
+      resetSearch();
+      resultsDiv.text("");
+      return;
+    }
+
+    const matches = talesWithPositions.filter((d) =>
+      d.tale.toLowerCase().includes(query)
+    );
+
+    if (matches.length === 0) {
+      resultsDiv.text("No tales found").style("color", "#ff6b6b");
+      dimAllTales();
+    } else {
+      const matchNames = matches
+        .slice(0, 3)
+        .map((d) => d.tale)
+        .join(", ");
+      const moreText =
+        matches.length > 3 ? ` and ${matches.length - 3} more` : "";
+      resultsDiv
+        .text(`Found ${matches.length} tale(s): ${matchNames}${moreText}`)
+        .style("color", "#51cf66");
+      highlightMatches(matches);
+    }
   });
 
-  // Create stacked area chart
-  const stack = d3
-    .stack()
-    .keys([
-      "sadness",
-      "joy",
-      "fear",
-      "anger",
-      "disgust",
-      "surprise",
-      "neutral",
-    ]);
+  clearButton.on("click", () => {
+    searchInput.node().value = "";
+    resetSearch();
+    resultsDiv.text("");
+  });
 
-  const series = stack(flowData);
+  function highlightMatches(matches) {
+    const matchTitles = new Set(matches.map((d) => d.tale));
 
-  // Draw stacked area chart with your emotion colors
-  const area = d3
-    .area()
-    .x((d) => xScale(d.data.year))
-    .y0((d) => flowYScale(d[0]))
-    .y1((d) => flowYScale(d[1]))
-    .curve(d3.curveMonotoneX);
+    taleGroups
+      .transition()
+      .duration(300)
+      .style("opacity", (d) => (matchTitles.has(d.tale) ? 1 : 0.15));
 
-  flowG
-    .selectAll(".emotion-layer")
-    .data(series)
-    .join("path")
-    .attr("class", "emotion-layer")
-    .attr("d", area)
-    .style("fill", (d) => emotionColors[d.key])
-    .style("opacity", 0.8);
+    // Also dim the connecting lines
+    g.selectAll(".stack-line")
+      .transition()
+      .duration(300)
+      .attr("opacity", (d) => (matchTitles.has(d.tale) ? 0.4 : 0.05));
+  }
+
+  function dimAllTales() {
+    taleGroups.transition().duration(300).style("opacity", 0.15);
+
+    g.selectAll(".stack-line").transition().duration(300).attr("opacity", 0.05);
+  }
+
+  function resetSearch() {
+    taleGroups.transition().duration(300).style("opacity", 1);
+
+    g.selectAll(".stack-line").transition().duration(300).attr("opacity", 0.2);
+  }
 }
 
 // Biographical context
-function addBiographicalContext(g, xScale, timelineY, width, height) {
-  // Period backgrounds
-  const periods = [
-    {
-      start: 1805,
-      end: 1819,
-      label: "Childhood",
-      color: "rgba(126, 211, 33, 0.03)",
-    },
-    {
-      start: 1819,
-      end: 1835,
-      label: "Education & Early Writing",
-      color: "rgba(74, 144, 226, 0.03)",
-    },
-    {
-      start: 1835,
-      end: 1872,
-      label: "Fairy Tale Period",
-      color: "rgba(248, 231, 28, 0.05)",
-    },
-    {
-      start: 1872,
-      end: 1875,
-      label: "Final Years",
-      color: "rgba(208, 2, 27, 0.03)",
-    },
-  ];
+// function addBiographicalContext(g, timeSegments, timelineY, width, height) {
+//   // Period backgrounds for the productive period only
+//   const periods = [
+//     {
+//       start: timeSegments[2].displayStart,
+//       end: timeSegments[2].displayEnd,
+//       label: "Fairy Tale Period",
+//       color: "rgba(248, 231, 28, 0.05)",
+//     },
+//   ];
 
-  periods.forEach((period) => {
-    g.append("rect")
-      .attr("x", xScale(period.start))
-      .attr("y", 0)
-      .attr("width", xScale(period.end) - xScale(period.start))
-      .attr("height", height)
-      .attr("fill", period.color)
-      .attr("pointer-events", "none");
+//   periods.forEach((period) => {
+//     g.append("rect")
+//       .attr("x", period.start)
+//       .attr("y", 0)
+//       .attr("width", period.end - period.start)
+//       .attr("height", height)
+//       .attr("fill", period.color)
+//       .attr("pointer-events", "none");
 
-    // Period label at top
-    g.append("text")
-      .attr("x", (xScale(period.start) + xScale(period.end)) / 2)
-      .attr("y", -15)
-      .attr("text-anchor", "middle")
-      .attr("fill", "#666")
-      .attr("font-size", "11px")
-      .attr("font-style", "italic")
-      .text(period.label);
-  });
-
-  // Life events
-  const lifeEvents = [
-    { year: 1805, label: "Born", color: "#7ED321" },
-    { year: 1835, label: "First tales", color: "#F8E71C" },
-    { year: 1872, label: "Last tale", color: "#F8E71C" },
-    { year: 1875, label: "Died", color: "#D0021B" },
-  ];
-
-  lifeEvents.forEach((event) => {
-    const x = xScale(event.year);
-
-    // Marker at timeline
-    g.append("circle")
-      .attr("cx", x)
-      .attr("cy", timelineY)
-      .attr("r", 6)
-      .attr("fill", event.color)
-      .attr("stroke", "#1a1a1a")
-      .attr("stroke-width", 2);
-
-    // Label below timeline
-    g.append("text")
-      .attr("x", x)
-      .attr("y", timelineY + 30)
-      .attr("text-anchor", "middle")
-      .attr("fill", "#aaaaaa")
-      .attr("font-size", "10px")
-      .text(event.label);
-  });
-}
+//     // Period label at top
+//     g.append("text")
+//       .attr("x", (period.start + period.end) / 2)
+//       .attr("y", -15)
+//       .attr("text-anchor", "middle")
+//       .attr("fill", "#666")
+//       .attr("font-size", "11px")
+//       .attr("font-style", "italic")
+//       .text(period.label);
+//   });
+// }
 
 function calculateOpacity(purity) {
   if (isNaN(purity) || purity === null || purity === undefined) {
@@ -395,24 +538,26 @@ function showTooltip(event, d, tooltip) {
   const emotions = [
     { name: "Sadness", value: d.sadness, color: emotionColors.sadness },
     { name: "Joy", value: d.joy, color: emotionColors.joy },
-    // ... etc
+    { name: "Fear", value: d.fear, color: emotionColors.fear },
+    { name: "Anger", value: d.anger, color: emotionColors.anger },
+    { name: "Disgust", value: d.disgust, color: emotionColors.disgust },
+    { name: "Surprise", value: d.surprise, color: emotionColors.surprise },
+    { name: "Neutral", value: d.neutral, color: emotionColors.neutral },
   ].sort((a, b) => b.value - a.value);
 
   const emotionBars = emotions
     .map(
       (e) => `
-      <div class="tooltip-emotion-bar">
-        <div class="tooltip-emotion-label">${e.name}</div>
-        <div class="tooltip-emotion-value">
-          <div class="tooltip-emotion-fill" 
-               style="width: ${e.value * 100}%; background-color: ${e.color};">
-          </div>
-        </div>
-        <div class="tooltip-emotion-percent">${(e.value * 100).toFixed(
-          0
-        )}%</div>
+    <div class="tooltip-emotion-bar">
+      <div class="tooltip-emotion-label">${e.name}</div>
+      <div class="tooltip-emotion-value">
+        <div class="tooltip-emotion-fill" style="width: ${
+          e.value * 100
+        }%; background-color: ${e.color};"></div>
       </div>
-    `
+      <div class="tooltip-emotion-percent">${(e.value * 100).toFixed(0)}%</div>
+    </div>
+  `
     )
     .join("");
 
@@ -428,19 +573,8 @@ function showTooltip(event, d, tooltip) {
           d.approximate ? "Approximate" : "Confirmed"
         }
       </div>
-      
       <div style="margin-bottom: 4px;"><strong>Emotional Profile:</strong></div>
       ${emotionBars}
-      
-      <!-- ADD THESE NEW ELEMENTS -->
-      <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #444;">
-        <button onclick="exploreTale('${d.tale}')" 
-                style="background: #4A90E2; color: white; border: none; 
-                       padding: 6px 12px; border-radius: 4px; cursor: pointer; 
-                       width: 100%;">
-          Explore Tale Details →
-        </button>
-      </div>
     </div>
   `;
 
@@ -449,74 +583,6 @@ function showTooltip(event, d, tooltip) {
     .style("left", event.pageX + 15 + "px")
     .style("top", event.pageY - 15 + "px")
     .style("opacity", 1);
-}
-
-// Add click handler to show more detail
-function exploreTale(taleName) {
-  // Option 1: Expand tooltip to show chunk-by-chunk breakdown
-  // Option 2: Open modal with full emotional journey chart
-  // Option 3: Navigate to dedicated tale detail page
-
-  // I'd recommend modal approach:
-  showTaleModal(taleName);
-}
-
-// In timeline.js
-function initSearch() {
-  const searchInput = d3.select("#tale-search");
-  const clearButton = d3.select("#clear-search");
-  const resultsDiv = d3.select("#search-results");
-
-  searchInput.on("input", function () {
-    const query = this.value.toLowerCase().trim();
-
-    if (query.length === 0) {
-      resetVisualization();
-      resultsDiv.text("");
-      return;
-    }
-
-    const matches = data.filter((d) => d.tale.toLowerCase().includes(query));
-
-    if (matches.length === 0) {
-      resultsDiv.text("No tales found");
-      dimAllTales();
-    } else {
-      resultsDiv.text(`Found ${matches.length} tale(s)`);
-      highlightTales(matches);
-    }
-  });
-
-  clearButton.on("click", () => {
-    searchInput.node().value = "";
-    resetVisualization();
-    resultsDiv.text("");
-  });
-}
-
-function highlightTales(matches) {
-  const matchTitles = new Set(matches.map((d) => d.tale));
-
-  // Dim non-matches
-  taleGroups.style("opacity", (d) => (matchTitles.has(d.tale) ? 1 : 0.2));
-
-  // Optionally zoom to matches if they're in a narrow time range
-  if (matches.length <= 5) {
-    const years = matches.map((d) => d.year);
-    const minYear = Math.min(...years);
-    const maxYear = Math.max(...years);
-
-    // Animate to focus on this time period
-    // (Implementation depends on your zoom setup)
-  }
-}
-
-function dimAllTales() {
-  taleGroups.style("opacity", 0.2);
-}
-
-function resetVisualization() {
-  taleGroups.style("opacity", 1);
 }
 
 function drawLegend() {
