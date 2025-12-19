@@ -1010,3 +1010,108 @@ function searchWithAliases(query) {
 │  - Shape meanings                               │
 │  - Interaction instructions                     │
 └─────────────────────────────────────────────────┘
+
+Let's prepare potential clustering/similarity features for a "recommender" type system. A common problem in our current data is that stories can be as short as 1 "chunk" in length or as long as 48 chunks. What's a way to compare these two stories? 
+
+A first pass will be low-hanging fruit; create summary statistics for each of the 7 emotions: min, mean, max, and sd which can be compared by some similarity algorithm (cosine? knn?).
+
+```{r}
+library(tidyverse)
+library(proxy)  # for distance/similarity functions
+library(corrplot)
+library(factoextra)
+
+# Create comprehensive statistical features for each story
+create_story_features <- function(emotion_df) {
+  
+  # Define emotions to analyze
+  emotions <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  
+  story_features <- emotion_df %>%
+    group_by(tale) %>%
+    summarise(
+      # Story metadata
+      num_chunks = n(),
+      total_tokens = sum(token_count, na.rm = TRUE),
+      avg_chunk_size = mean(token_count, na.rm = TRUE),
+      
+      # Statistical features for each emotion
+      across(all_of(emotions), list(
+        mean = ~mean(.x, na.rm = TRUE),
+        sd = ~sd(.x, na.rm = TRUE),
+        min = ~min(.x, na.rm = TRUE),
+        max = ~max(.x, na.rm = TRUE),
+        q25 = ~quantile(.x, 0.25, na.rm = TRUE),
+        q75 = ~quantile(.x, 0.75, na.rm = TRUE),
+        range = ~max(.x, na.rm = TRUE) - min(.x, na.rm = TRUE),
+        cv = ~sd(.x, na.rm = TRUE) / mean(.x, na.rm = TRUE),  # coefficient of variation
+        skew = ~moments::skewness(.x, na.rm = TRUE),
+        kurtosis = ~moments::kurtosis(.x, na.rm = TRUE)
+      ), .names = "{.col}_{.fn}"),
+      
+      # Emotional trajectory features (slopes)
+      across(all_of(emotions), list(
+        slope = ~if(n() > 1) coef(lm(.x ~ chunk))[2] else 0,
+        slope_pval = ~if(n() > 1) summary(lm(.x ~ chunk))$coefficients[2,4] else 1
+      ), .names = "{.col}_{.fn}"),
+      
+      # Dominant emotion consistency
+      dominant_emotion_mode = names(sort(table(dominant_emotion), decreasing = TRUE))[1],
+      dominant_consistency = max(table(dominant_emotion)) / n(),
+      
+      # Emotional complexity measures
+      emotion_entropy = -sum(sapply(emotions, function(e) {
+        p <- mean(get(e), na.rm = TRUE)
+        if(p > 0) p * log(p) else 0
+      })),
+      
+      # Emotional variability (how much emotions change)
+      total_emotion_variance = sum(sapply(emotions, function(e) var(get(e), na.rm = TRUE))),
+      
+      # Story arc features
+      beginning_intensity = if(n() >= 3) mean(c(anger[1], fear[1], sadness[1]), na.rm = TRUE) else NA,
+      middle_intensity = if(n() >= 3) {
+        mid_start <- ceiling(n()/3)
+        mid_end <- floor(2*n()/3)
+        mean(c(anger[mid_start:mid_end], fear[mid_start:mid_end], sadness[mid_start:mid_end]), na.rm = TRUE)
+      } else NA,
+      end_intensity = if(n() >= 3) mean(c(anger[n()], fear[n()], sadness[n()]), na.rm = TRUE) else NA
+      
+    ) %>%
+    ungroup() %>%
+    # Create additional derived features
+    mutate(
+      # Emotional arc classification
+      arc_pattern = case_when(
+        is.na(beginning_intensity) | is.na(end_intensity) ~ "Single_Chunk",
+        end_intensity > beginning_intensity + 0.1 ~ "Rising_Tension",
+        beginning_intensity > end_intensity + 0.1 ~ "Tension_Resolution", 
+        abs(middle_intensity - beginning_intensity) > 0.1 & 
+        abs(end_intensity - beginning_intensity) < 0.05 ~ "Journey_Return",
+        TRUE ~ "Steady_State"
+      ),
+      
+      # Positive vs negative emotional balance
+      positive_balance = (joy_mean + surprise_mean) - (anger_mean + sadness_mean + fear_mean + disgust_mean),
+      emotional_intensity = 1 - neutral_mean,
+      
+      # Length categories for comparison
+      length_category = case_when(
+        num_chunks == 1 ~ "Single",
+        num_chunks <= 5 ~ "Short", 
+        num_chunks <= 15 ~ "Medium",
+        TRUE ~ "Long"
+      )
+    )
+  
+  return(story_features)
+}
+
+# Apply the function
+story_features <- create_story_features(emotion_results)
+
+# Display summary
+cat("Created", ncol(story_features), "features for", nrow(story_features), "stories\n")
+glimpse(story_features)
+```
+

@@ -36,32 +36,55 @@ let talesWithPositions;
 
 function createAbbreviatedTimeScale(width) {
   // Define the time segments we want to show
-  // Visual spacing: make each 15-year period the same width (80px)
-  const segmentWidth = 80;
-  const gapWidth = 50; // Space for zigzag breaks
+  // Visual spacing: make each time period proportional to width
+  const segmentWidth = 0.1 * width;
+  const gapWidth = 0.05 * width; // Space for zigzag breaks
 
   const timeSegments = [
     {
       period: "birth",
       start: 1805,
-      end: 1805,
+      end: 1812.5,
       displayStart: 0,
-      displayEnd: segmentWidth,
+      displayEnd: segmentWidth / 2,
       yearMarkers: [], // No year marker - will use Birth life event instead
     },
     {
       period: "early",
-      start: 1820,
-      end: 1834,
-      displayStart: segmentWidth + gapWidth,
-      displayEnd: segmentWidth + gapWidth + segmentWidth,
-      yearMarkers: [{ year: 1820, displayX: segmentWidth + gapWidth }],
+      start: 1812.5,
+      end: 1827.5,
+      displayStart: segmentWidth / 2 + gapWidth,
+      displayEnd: segmentWidth / 2 + gapWidth + segmentWidth,
+      yearMarkers: [
+        {
+          year: 1820,
+          displayX: segmentWidth / 2 + gapWidth + segmentWidth / 2,
+        },
+      ],
+    },
+    {
+      period: "transition",
+      start: 1827.5,
+      end: 1835,
+      displayStart: segmentWidth / 2 + gapWidth + segmentWidth + gapWidth,
+      displayEnd:
+        segmentWidth / 2 +
+        gapWidth +
+        segmentWidth +
+        gapWidth +
+        segmentWidth / 2,
+      yearMarkers: [], // Could add 1830 marker if desired
     },
     {
       period: "productive",
       start: 1835,
       end: 1875,
-      displayStart: 2 * segmentWidth + 2 * gapWidth,
+      displayStart:
+        segmentWidth / 2 +
+        gapWidth +
+        segmentWidth +
+        gapWidth +
+        segmentWidth / 2, // No gap - connects directly
       displayEnd: width,
       yearMarkers: [], // Will be calculated dynamically
     },
@@ -86,8 +109,8 @@ function createAbbreviatedTimeScale(width) {
 }
 
 function drawTimelineWithBreaks(g, timeSegments, timelineY, height) {
-  // Calculate year markers for the productive period
-  const productiveSegment = timeSegments[2];
+  // Calculate year markers for the productive period (now at index 3)
+  const productiveSegment = timeSegments[3];
   const yearInterval = 5; // Show every 5 years
 
   for (let year = 1835; year <= 1875; year += yearInterval) {
@@ -186,7 +209,7 @@ function drawTimelineWithBreaks(g, timeSegments, timelineY, height) {
       label: "Death",
       shape: "cross",
       color: "#888",
-      displayX: timeSegments[2].displayEnd, // End of timeline
+      displayX: timeSegments[timeSegments.length - 1].displayEnd, // End of timeline (last segment)
     },
   ];
 
@@ -494,39 +517,6 @@ function initSearch() {
   }
 }
 
-// Biographical context
-// function addBiographicalContext(g, timeSegments, timelineY, width, height) {
-//   // Period backgrounds for the productive period only
-//   const periods = [
-//     {
-//       start: timeSegments[2].displayStart,
-//       end: timeSegments[2].displayEnd,
-//       label: "Fairy Tale Period",
-//       color: "rgba(248, 231, 28, 0.05)",
-//     },
-//   ];
-
-//   periods.forEach((period) => {
-//     g.append("rect")
-//       .attr("x", period.start)
-//       .attr("y", 0)
-//       .attr("width", period.end - period.start)
-//       .attr("height", height)
-//       .attr("fill", period.color)
-//       .attr("pointer-events", "none");
-
-//     // Period label at top
-//     g.append("text")
-//       .attr("x", (period.start + period.end) / 2)
-//       .attr("y", -15)
-//       .attr("text-anchor", "middle")
-//       .attr("fill", "#666")
-//       .attr("font-size", "11px")
-//       .attr("font-style", "italic")
-//       .text(period.label);
-//   });
-// }
-
 function calculateOpacity(purity) {
   if (isNaN(purity) || purity === null || purity === undefined) {
     return 0.5;
@@ -569,9 +559,6 @@ function showTooltip(event, d, tooltip) {
     d.approximate ? " (approximate)" : ""
   }<br>
         <strong>Length:</strong> ${d.num_chunks} chunks<br>
-        <strong>Date Certainty:</strong> ${
-          d.approximate ? "Approximate" : "Confirmed"
-        }
       </div>
       <div style="margin-bottom: 4px;"><strong>Emotional Profile:</strong></div>
       ${emotionBars}
@@ -630,7 +617,7 @@ function drawLegend() {
     .style("font-style", "italic")
     .style("color", "#888");
 
-  noteItem.append("span").text("Tales stack by: certainty → emotion → size");
+  noteItem.append("span").text("Tales stack by: emotion → certainty → size");
 }
 
 init();
