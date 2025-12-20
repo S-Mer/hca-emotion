@@ -1015,6 +1015,352 @@ Let's prepare potential clustering/similarity features for a "recommender" type 
 
 A first pass will be low-hanging fruit; create summary statistics for each of the 7 emotions: min, mean, max, and sd which can be compared by some similarity algorithm (cosine? knn?).
 
+Let's actually start with DTW just using the values we already have.
+
+```{r}
+library(dtw)
+
+# Pure DTW comparison of emotional trajectories
+calculate_dtw_emotion_similarity <- function(emotion_results, emotions_to_use = NULL) {
+  
+  if(is.null(emotions_to_use)) {
+    emotions_to_use <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  }
+  
+  tales <- unique(emotion_results$tale)
+  n_tales <- length(tales)
+  
+  # Initialize similarity matrix
+  dtw_matrix <- matrix(0, nrow = n_tales, ncol = n_tales)
+  rownames(dtw_matrix) <- tales
+  colnames(dtw_matrix) <- tales
+  
+  cat("Calculating DTW similarities for", n_tales, "tales...\n")
+  pb <- txtProgressBar(min = 0, max = n_tales * (n_tales - 1) / 2, style = 3)
+  counter <- 0
+  
+  for(i in 1:n_tales) {
+    for(j in i:n_tales) {
+      
+      if(i == j) {
+        dtw_matrix[i, j] <- 1.0  # Perfect self-similarity
+        next
+      }
+      
+      # Get emotion trajectories for both stories
+      story1_data <- emotion_results %>% 
+        filter(tale == tales[i]) %>% 
+        arrange(chunk) %>%
+        select(all_of(emotions_to_use))
+      
+      story2_data <- emotion_results %>% 
+        filter(tale == tales[j]) %>% 
+        arrange(chunk) %>%
+        select(all_of(emotions_to_use))
+      
+      if(nrow(story1_data) == 0 || nrow(story2_data) == 0) {
+        dtw_matrix[i, j] <- dtw_matrix[j, i] <- 0
+        next
+      }
+      
+      # Calculate DTW distance for each emotion separately, then combine
+      emotion_distances <- map_dbl(emotions_to_use, function(emotion) {
+        
+        seq1 <- story1_data[[emotion]]
+        seq2 <- story2_data[[emotion]]
+        
+        # DTW alignment
+        dtw_result <- dtw(seq1, seq2, 
+                         distance.only = TRUE,
+                         step.pattern = symmetric2)  # Allow flexible alignment
+        
+        return(dtw_result$distance)
+      })
+      
+      # Combine distances across emotions (simple average)
+      avg_distance <- mean(emotion_distances)
+      
+      # Convert distance to similarity (0-1 scale)
+      # Using adaptive normalization based on sequence lengths
+      max_possible_distance <- sqrt(sum(c(length(story1_data[[1]]), length(story2_data[[1]]))))
+      similarity <- exp(-avg_distance / max_possible_distance)
+      
+      # Store symmetric similarity
+      dtw_matrix[i, j] <- dtw_matrix[j, i] <- similarity
+      
+      counter <- counter + 1
+      setTxtProgressBar(pb, counter)
+    }
+  }
+  
+  close(pb)
+  return(dtw_matrix)
+}
+
+# Calculate DTW similarities
+dtw_similarities <- calculate_dtw_emotion_similarity(emotion_results)
+
+# Function to get recommendations based on DTW
+recommend_by_dtw <- function(target_tale, dtw_matrix, n_recs = 5) {
+  
+  if(!target_tale %in% rownames(dtw_matrix)) {
+    stop("Tale not found in similarity matrix")
+  }
+  
+  # Get similarities for target tale
+  similarities <- dtw_matrix[target_tale, ]
+  
+  # Remove self and sort
+  similarities <- similarities[names(similarities) != target_tale]
+  top_matches <- sort(similarities, decreasing = TRUE)[1:n_recs]
+  
+  # Create results with story length info for context
+  recommendations <- tibble(
+    recommended_tale = names(top_matches),
+    dtw_similarity = as.numeric(top_matches),
+    similarity_percent = round(as.numeric(top_matches) * 100, 1)
+  ) %>%
+    left_join(
+      emotion_results %>% 
+        group_by(tale) %>% 
+        summarise(num_chunks = n(), .groups = "drop"),
+      by = c("recommended_tale" = "tale")
+    )
+  
+  return(recommendations)
+}
+
+# Test DTW recommendations
+dtw_recs <- recommend_by_dtw("The ugly duckling", dtw_similarities)
+recommend_by_dtw("\"Something\"", dtw_similarities)
+print(dtw_recs)
+
+# Plot both of the following stories' emotional trajectories on one Rstudio plot for comparison. We already have function plot_tale, can we use par(mfrow) or something similar?
+
+par(mfrow = c(2, 1))  # 2 rows, 1 column
+
+
+plot_tale("\"Something\"")
+plot_tale("The shepherdess and the sweep")
+```
+
+Using other similarity measure for sanity and comparison
+
+```{r}
+# 1. Cosine similarity of raw emotion vectors (no temporal alignment)
+calculate_cosine_similarity <- function(story1, story2, emotion_results) {
+  
+  emotions <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  
+  s1_data <- emotion_results %>% filter(tale == story1) %>% select(all_of(emotions))
+  s2_data <- emotion_results %>% filter(tale == story2) %>% select(all_of(emotions))
+  
+  # Flatten to vectors
+  s1_vec <- as.numeric(unlist(s1_data))
+  s2_vec <- as.numeric(unlist(s2_data))
+  
+  # Pad shorter vector with means to make same length
+  if(length(s1_vec) != length(s2_vec)) {
+    if(length(s1_vec) < length(s2_vec)) {
+      s1_vec <- c(s1_vec, rep(mean(s1_vec), length(s2_vec) - length(s1_vec)))
+    } else {
+      s2_vec <- c(s2_vec, rep(mean(s2_vec), length(s1_vec) - length(s2_vec)))
+    }
+  }
+  
+  # Cosine similarity
+  cos_sim <- sum(s1_vec * s2_vec) / (sqrt(sum(s1_vec^2)) * sqrt(sum(s2_vec^2)))
+  return(cos_sim)
+}
+
+# 2. Correlation of emotion profiles (average emotion levels)
+calculate_profile_correlation <- function(story1, story2, emotion_results) {
+  
+  emotions <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  
+  s1_profile <- emotion_results %>% 
+    filter(tale == story1) %>% 
+    summarise(across(all_of(emotions), mean)) %>%
+    unlist()
+  
+  s2_profile <- emotion_results %>% 
+    filter(tale == story2) %>% 
+    summarise(across(all_of(emotions), mean)) %>%
+    unlist()
+  
+  return(cor(s1_profile, s2_profile))
+}
+
+# 3. Euclidean distance of emotion profiles
+calculate_profile_distance <- function(story1, story2, emotion_results) {
+  
+  emotions <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  
+  s1_profile <- emotion_results %>% 
+    filter(tale == story1) %>% 
+    summarise(across(all_of(emotions), mean)) %>%
+    unlist()
+  
+  s2_profile <- emotion_results %>% 
+    filter(tale == story2) %>% 
+    summarise(across(all_of(emotions), mean)) %>%
+    unlist()
+  
+  euclidean_dist <- sqrt(sum((s1_profile - s2_profile)^2))
+  # Convert to similarity (0-1 scale)
+  return(exp(-euclidean_dist))
+}
+
+# Compare all methods for your example
+compare_similarity_methods <- function(story1, story2, emotion_results) {
+  
+  cat("Similarity between '", story1, "' and '", story2, "':\n")
+  cat("==================================================\n")
+  
+  # DTW similarity (from your existing matrix)
+  dtw_sim <- dtw_similarities[story1, story2]
+  cat("DTW Similarity:", round(dtw_sim, 3), "\n")
+  
+  # Cosine similarity
+  cos_sim <- calculate_cosine_similarity(story1, story2, emotion_results)
+  cat("Cosine Similarity:", round(cos_sim, 3), "\n")
+  
+  # Profile correlation
+  prof_cor <- calculate_profile_correlation(story1, story2, emotion_results)
+  cat("Profile Correlation:", round(prof_cor, 3), "\n")
+  
+  # Profile distance
+  prof_dist <- calculate_profile_distance(story1, story2, emotion_results)
+  cat("Profile Distance Similarity:", round(prof_dist, 3), "\n")
+  
+  cat("\n")
+}
+
+# Test on your example
+compare_similarity_methods("\"Something\"", "The shepherdess and the sweep", emotion_results)
+
+# Also test on a few other pairs for comparison
+compare_similarity_methods("The ugly duckling", "The little mermaid", emotion_results)
+```
+
+Visual comparisons of methods
+
+```{r}
+# Create a visual comparison tool
+create_comparison_plots <- function(story1, story2, emotion_results) {
+  
+  emotions <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  
+  # Get data
+  s1_data <- emotion_results %>% 
+    filter(tale == story1) %>% 
+    arrange(chunk) %>%
+    select(chunk, all_of(emotions)) %>%
+    mutate(story = story1, position = row_number())
+  
+  s2_data <- emotion_results %>% 
+    filter(tale == story2) %>% 
+    arrange(chunk) %>%
+    select(chunk, all_of(emotions)) %>%
+    mutate(story = story2, position = row_number())
+  
+  # Combine and reshape
+  plot_data <- bind_rows(s1_data, s2_data) %>%
+    pivot_longer(all_of(emotions), names_to = "emotion", values_to = "intensity")
+  
+  # Plot 1: Side-by-side trajectories
+  trajectory_plot <- ggplot(plot_data, aes(x = position, y = intensity, color = emotion)) +
+    geom_line(linewidth = 1.2, alpha = 0.8) +
+    geom_point(size = 2) +
+    facet_wrap(~story, scales = "free_x", ncol = 1) +
+    labs(
+      title = paste("Emotional Trajectories Comparison"),
+      subtitle = paste(story1, "vs", story2),
+      x = "Position in Story",
+      y = "Emotion Intensity"
+    ) +
+    theme_minimal() +
+    scale_color_manual(values = c(
+      "anger" = "#D0021B", "joy" = "#7ED321", "sadness" = "#4A90E2",
+      "fear" = "#9013FE", "disgust" = "#F5A623", "surprise" = "#F8E71C", 
+      "neutral" = "#9B9B9B"
+    )) +
+    theme(legend.position = "bottom")
+  
+  # Plot 2: Average emotion profiles
+  profile_data <- plot_data %>%
+    group_by(story, emotion) %>%
+    summarise(avg_intensity = mean(intensity), .groups = "drop") %>%
+    pivot_wider(names_from = story, values_from = avg_intensity) %>%
+    rename(story1_avg = all_of(story1), story2_avg = all_of(story2))
+  
+  profile_plot <- ggplot(profile_data, aes(x = story1_avg, y = story2_avg)) +
+    geom_point(aes(color = emotion), size = 4) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.5) +
+    geom_text(aes(label = emotion), hjust = 1.1, size = 3) +
+    labs(
+      title = "Average Emotion Profile Comparison",
+      x = paste("Average intensity in", story1),
+      y = paste("Average intensity in", story2),
+      subtitle = "Points near diagonal line = similar average levels"
+    ) +
+    theme_minimal() +
+    scale_color_manual(values = c(
+      "anger" = "#D0021B", "joy" = "#7ED321", "sadness" = "#4A90E2",
+      "fear" = "#9013FE", "disgust" = "#F5A623", "surprise" = "#F8E71C", 
+      "neutral" = "#9B9B9B"
+    )) +
+    theme(legend.position = "none")
+  
+  # Combine plots
+  library(patchwork)
+  combined_plot <- trajectory_plot / profile_plot
+  
+  print(combined_plot)
+  return(invisible(combined_plot))
+}
+
+# Visualize your problematic pair
+create_comparison_plots("\"Something\"", "The shepherdess and the sweep", emotion_results)
+```
+
+```{r}
+# Weight emotions differently - maybe fear is dominating the similarity
+calculate_weighted_dtw <- function(story1, story2, emotion_results, emotion_weights = NULL) {
+  
+  emotions <- c("anger", "joy", "sadness", "fear", "disgust", "surprise", "neutral")
+  
+  # Default: reduce weight of dominant emotions to see other patterns
+  if(is.null(emotion_weights)) {
+    emotion_weights <- c(anger = 1, joy = 1, sadness = 1, fear = 0.5, 
+                        disgust = 1, surprise = 1, neutral = 0.3)
+  }
+  
+  s1_data <- emotion_results %>% filter(tale == story1) %>% arrange(chunk)
+  s2_data <- emotion_results %>% filter(tale == story2) %>% arrange(chunk)
+  
+  weighted_distances <- map_dbl(emotions, function(emotion) {
+    seq1 <- s1_data[[emotion]]
+    seq2 <- s2_data[[emotion]]
+    
+    dtw_dist <- dtw(seq1, seq2, distance.only = TRUE)$distance
+    return(dtw_dist * emotion_weights[emotion])
+  })
+  
+  avg_weighted_distance <- mean(weighted_distances)
+  max_possible <- sqrt(nrow(s1_data) + nrow(s2_data))
+  
+  similarity <- exp(-avg_weighted_distance / max_possible)
+  return(similarity)
+}
+
+# Test with reduced fear weight
+weighted_sim <- calculate_weighted_dtw("Something", "The shepherdess and the sweep", emotion_results)
+cat("Weighted DTW similarity (reduced fear weight):", round(weighted_sim, 3), "\n")
+```
+
+
+
 ```{r}
 library(tidyverse)
 library(proxy)  # for distance/similarity functions
@@ -1113,5 +1459,7 @@ story_features <- create_story_features(emotion_results)
 # Display summary
 cat("Created", ncol(story_features), "features for", nrow(story_features), "stories\n")
 glimpse(story_features)
+
+story_features %>% view()
 ```
 
